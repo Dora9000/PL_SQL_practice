@@ -1,0 +1,56 @@
+-- Procedure WriteExRate
+
+Create Or Replace Procedure WriteExRate(FromCurrency IN CHAR,
+                                        ToCurrency IN CHAR,
+                                        ExchangeRate IN NUMBER,
+                                        LTimestamp IN OUT TIMESTAMP,
+                                        StatusCode OUT NUMBER) Is
+
+  Begin
+   StatusCode := 0;
+   IF LTimestamp IS NULL THEN
+      LTimestamp := systimestamp;
+      dbms_output.put_line('Using system timestamp');
+   END IF;
+
+   IF FromCurrency IS NULL OR ToCurrency IS NULL OR ExchangeRate IS NULL THEN
+      dbms_output.put_line('Error. Fields contain NULL');
+      raise NO_DATA_FOUND;
+   END IF;
+
+    Begin
+      INSERT INTO EXRATES (FROMCURRENCY, TOCURRENCY, RATE, LTIMESTAMP) 
+      VALUES (FromCurrency, 
+           ToCurrency, 
+           ExchangeRate,
+           LTimestamp
+         );
+         COMMIT;
+    Exception
+      WHEN DUP_VAL_ON_INDEX THEN
+         dbms_output.put_line('Error happend. Primary key is not unique');
+         ROLLBACK;
+         StatusCode := -1;
+      WHEN others THEN
+         dbms_output.put_line('Error happend. No data was inserted.');
+         ROLLBACK;
+         StatusCode := -1;
+    End;
+  End;
+
+
+
+
+-- Test
+
+declare
+x Number(10);
+t TIMESTAMP;
+    Cursor cEXRATE (cFROMCURRENCY CHAR, cTOCURRENCY CHAR) Is 
+(SELECT LTIMESTAMP FROM EXRATES WHERE FROMCURRENCY=cFROMCURRENCY AND TOCURRENCY=cTOCURRENCY);
+Begin
+    OPEN cEXRATE ('036','840');
+    FETCH cEXRATE INTO t;
+   WriteExRate('036','840', 0.70034, t, x);
+   dbms_output.put_line(x);
+End;
