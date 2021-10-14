@@ -1,0 +1,45 @@
+-- Origin. Executes immediately because the internal table is empty
+Select * from Coupons co
+Where co.customerid In 
+(
+    Select cu.id from Customers cu
+    Where cu.serno Not In
+    (
+        Select p.customerserno From Payments p
+    )
+)
+
+
+-- more than 20 mins
+Select * from Coupons co
+Where co.customerid In 
+(
+    Select cu.id from Customers cu
+    Where cu.serno In
+    (
+        Select p.customerserno From Payments p
+    )
+)
+
+
+-- 11 sec
+Select * from Coupons co
+Join Customers cu On cu.id=co.customerid
+Where cu.serno In
+(
+    Select p.customerserno From Payments p
+)
+
+
+-- 13 sec
+Select * from Coupons co
+Join Customers cu On cu.id=co.customerid
+Join Payments p On cu.serno=p.customerserno;
+
+
+-- 12 sec
+Select * from Coupons co
+Join (Select cu.id from Customers cu 
+     Join Payments p On cu.serno=p.customerserno
+     ) s 
+On s.id=co.customerid;
