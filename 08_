@@ -1,0 +1,270 @@
+
+--grant create type to student;
+create or replace type EXRATE_T is object (
+  FromCurrency VARCHAR(3),
+  ToCurrency VARCHAR(3),
+  Rate NUMBER(20,10),
+  LTimestamp TIMESTAMP(3)
+)
+
+
+
+
+-- Create package
+CREATE OR REPLACE PACKAGE ExrateTools AS
+Procedure WriteExRate(FromCurrency IN CHAR,
+                      ToCurrency IN CHAR,
+                      ExchangeRate IN NUMBER,
+                      LTimestamp IN OUT TIMESTAMP,
+                      StatusCode OUT NUMBER);
+
+Procedure WriteExrateToQueue(message EXRATE_T);
+
+Procedure ReadExrateFromQueue;
+END ExrateTools;
+
+
+
+CREATE OR REPLACE PACKAGE BODY ExrateTools AS
+
+ Procedure WriteExRate(FromCurrency IN CHAR,
+                      ToCurrency IN CHAR,
+                      ExchangeRate IN NUMBER,
+                      LTimestamp IN OUT TIMESTAMP,
+                      StatusCode OUT NUMBER) Is
+
+  Begin
+   StatusCode := 0;
+   IF LTimestamp IS NULL THEN
+      LTimestamp := systimestamp;
+      dbms_output.put_line('Using system timestamp');
+   END IF;
+
+   IF FromCurrency IS NULL OR ToCurrency IS NULL OR ExchangeRate IS NULL THEN
+      dbms_output.put_line('Error. Fields contain NULL');
+      raise NO_DATA_FOUND;
+   END IF;
+
+    Begin
+      INSERT INTO EXRATES (FROMCURRENCY, TOCURRENCY, RATE, LTIMESTAMP) 
+      VALUES (FromCurrency, 
+           ToCurrency, 
+           ExchangeRate,
+           LTimestamp
+         );
+         COMMIT;
+    Exception
+      WHEN DUP_VAL_ON_INDEX THEN
+         dbms_output.put_line('Error happend. Primary key is not unique');
+         ROLLBACK;
+         StatusCode := -1;
+      WHEN others THEN
+         dbms_output.put_line('Error happend. No data was inserted.');
+         ROLLBACK;
+         StatusCode := -1;
+    End;
+  End WriteExRate;
+
+ Procedure WriteExrateToQueue(message EXRATE_T) Is
+  l_msg_id raw(16);
+  l_enq_opt dbms_aq.enqueue_options_t;
+  l_msg_prop dbms_aq.message_properties_t;
+begin
+  l_enq_opt.visibility := dbms_aq.immediate;
+  l_msg_prop.expiration := dbms_aq.never;
+    dbms_aq.enqueue(
+      queue_name         => 'EXRATES_OUT_Q',
+      enqueue_options    => l_enq_opt,
+      message_properties => l_msg_prop,
+      payload            => message,
+      msgid              => l_msg_id
+    );
+  --commit; --cannot commit in the trigger
+end WriteExrateToQueue;
+
+Procedure ReadExrateFromQueue Is
+  l_msg_id raw(16);
+  l_deq_opt dbms_aq.dequeue_options_t;
+  l_msg_prop dbms_aq.message_properties_t;
+  l_payload EXRATE_T;
+  StatusCode NUMBER;
+begin
+  l_deq_opt.dequeue_mode := dbms_aq.browse;
+  l_deq_opt.navigation := dbms_aq.first_message;
+  l_deq_opt.wait := dbms_aq.no_wait;
+  l_deq_opt.consumer_name := 'SUBS'; --'SUBS1',
+
+  --l_deq_opt.DEQUEUE_MODE := DBMS_AQ.REMOVE;
+    dbms_aq.dequeue(
+      queue_name         => 'EXRATES_OUT_Q',  --'EXRATES_IN_Q',
+      dequeue_options    => l_deq_opt,
+      message_properties => l_msg_prop,
+      payload            => l_payload,
+      msgid              => l_msg_id
+    );
+
+StatusCode := 0;
+Begin
+  WriteExRate(l_payload.FromCurrency, l_payload.ToCurrency, l_payload.Rate, l_payload.LTimestamp, StatusCode);
+Exception
+  when others then
+    dbms_output.put_line('Error happend');
+End;
+dbms_output.put_line('Status is : '|| StatusCode);
+dbms_output.put_line('Time : '|| l_payload.LTimestamp);
+end ReadExrateFromQueue;
+
+
+END ExrateTools;
+
+
+
+
+-- Table for queues
+--GRANT EXECUTE ON DBMS_AQADM to student
+--GRANT EXECUTE ON DBMS_AQ to student
+begin
+  dbms_aqadm.create_queue_table(
+    queue_table        => 'EXRATES_QTB',
+    queue_payload_type => 'EXRATE_T',
+    multiple_consumers => true
+  );
+end;
+
+
+select * from EXRATES_QTB;
+select * from AQ$EXRATES_QTB;
+
+
+-- Queue
+begin
+  dbms_aqadm.create_queue(
+    queue_name  => 'EXRATES_OUT_Q',
+    queue_table => 'EXRATES_QTB'
+  );
+end;
+
+
+-- Start queue
+begin
+  dbms_aqadm.start_queue(
+    queue_name  => 'EXRATES_OUT_Q'
+  );
+end;
+
+
+-- Subscriber with name 'subscriber'
+begin
+dbms_aqadm.add_subscriber(queue_name => 'EXRATES_OUT_Q',
+subscriber =>
+sys.aq$_agent('subscriber','student.EXRATES_DST_Q@IGOORCL2',null), queue_to_queue => true);
+end;
+
+
+
+-- Insert message (procedure from package)
+Create Or Replace Procedure WriteExrateToQueue(message EXRATE_T)
+
+
+--Try to insert message
+declare
+  msg EXRATE_T;
+  xFromCurrency CHAR(3);
+  xToCurrency CHAR(3);
+  xRate NUMBER(20,10);
+  xLTimestamp TIMESTAMP(3);
+begin
+xFromCurrency := '840';
+xToCurrency := '978';
+xRate := 1.5;
+xLTimestamp := systimestamp;
+msg := EXRATE_T(FromCurrency => xFromCurrency, ToCurrency => xToCurrency, Rate => xRate, LTimestamp => xLTimestamp);
+WriteExrateToQueue(msg);
+end;
+
+
+
+-- Check that message was inserted
+select * from AQ$EXRATES_QTB;
+
+
+
+--create Trigger
+--grant create trigger to student;
+create or replace trigger EXRATES_TRG after insert on EXRATES REFERENCING new AS new_data FOR EACH ROW
+DECLARE
+msg EXRATE_T;
+BEGIN
+msg := EXRATE_T(FromCurrency => :new_data.FromCurrency, 
+                ToCurrency => :new_data.ToCurrency, 
+                Rate => :new_data.Rate, 
+                LTimestamp => :new_data.LTimestamp);
+WriteExrateToQueue(msg);
+END;
+
+-- Test
+INSERT INTO EXRATES(FromCurrency, ToCurrency, Rate, LTimestamp) 
+VALUES('840','978',1.5, systimestamp);
+
+
+--create second queue http://oracle-experience.blogspot.com/2014/11/oracle-aq.html
+begin
+  dbms_aqadm.create_queue(
+    queue_name  => 'EXRATES_IN_Q',
+    queue_table => 'EXRATES_QTB'
+  );
+end;
+
+-- Start queue
+begin
+  dbms_aqadm.start_queue(
+    queue_name  => 'EXRATES_IN_Q'
+  );
+end;
+
+-- (does the subscriber matters here?)
+begin
+  dbms_aqadm.add_subscriber(queue_name => 'EXRATES_IN_Q',
+  subscriber => sys.aq$_agent('SUBS1',null,null), queue_to_queue => true);
+end;
+
+
+-- procedure from package
+Create Or Replace Procedure ReadExrateFromQueue
+
+-- Test
+begin
+ReadExrateFromQueue();
+end;
+
+
+
+--verify that queues are same (1 for ok)
+declare
+  rc binary_integer;
+begin
+  dbms_aqadm.verify_queue_types(src_queue_name => 'EXRATES_OUT_Q',
+                                dest_queue_name => 'student.EXRATES_DST_Q',
+                                destination => 'IGORCL2.tsys.tss.net',
+                                rc => rc);
+  dbms_output.put_line(rc); 
+end;
+
+
+
+begin
+  dbms_aqadm.schedule_propagation(queue_name => 'EXRATES_OUT_Q',
+  latency => 60,
+  start_time => SYSDATE,
+  destination => 'IGORCL2.tsys.tss.net',
+  destination_queue => 'EXRATES_DST_Q'
+  );
+end;
+
+
+
+-- get all sheduled propagations:
+-- select * from DBA_QUEUE_SCHEDULES;
+
+-- get all messages from all queues:
+-- select * from EXRATES_QTB;
