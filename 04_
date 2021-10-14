@@ -1,0 +1,48 @@
+declare 
+  i VARCHAR2(3);
+  j VARCHAR2(3);
+  xLTIMESTAMP TIMESTAMP(3);
+
+  rate NUMBER(20,10);
+  TYPE mp IS TABLE OF NUMBER INDEX BY VARCHAR2(3); 
+  data1 mp; 
+  TYPE name_mp IS TABLE OF VARCHAR2(3) INDEX BY VARCHAR2(3); 
+  names name_mp; 
+begin  
+
+   data1 ('840') := 1; 
+   data1 ('826') := 1.2; 
+   data1 ('643') := 0.7; 
+   data1 ('978') := 1.1;  
+   data1 ('036') := 0.7;  
+
+   --data1 ('840') := 1; 
+   --data1 ('826') := 1.24; 
+   --data1 ('643') := 0.76; 
+   --data1 ('978') := 1.12;  
+   --data1 ('036') := 0.69;  
+ 
+  xLTIMESTAMP := systimestamp;
+  dbms_output.put_line(xLTIMESTAMP);
+
+   i := data1.FIRST;
+   WHILE i IS NOT NULL LOOP
+      j := data1.FIRST;
+      WHILE j IS NOT NULL LOOP
+        rate := data1(i) / data1(j);  -- from i to j
+
+        INSERT INTO EXRATES (FROMCURRENCY, TOCURRENCY, RATE, LTIMESTAMP) 
+        VALUES (
+           CAST(i AS CHAR(3)), 
+           CAST(j AS CHAR(3)), 
+           rate,
+           xLTIMESTAMP
+          );  
+
+        j := data1.NEXT(j);
+      END LOOP;
+      i := data1.NEXT(i);
+      COMMIT;
+   END LOOP;
+  
+end;
