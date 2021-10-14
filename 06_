@@ -1,0 +1,96 @@
+-- Procedure InsertPayment
+
+Create Or Replace Procedure InsertPayment(CustomerID IN NUMBER,
+                          PaymentCurrency IN CHAR,
+                          PaymentAmount IN NUMBER,
+                          SERNO OUT NUMBER,
+                          BaseAmount OUT NUMBER) Is
+Cursor cCustomerSERNO (CustomerID NUMBER) Is 
+      Select SERNO From CUSTOMERS e
+      WHERE ID = CustomerID;
+      xCustomerSERNO NUMBER(10);
+  Begin
+    IF CustomerID IS NULL OR PaymentCurrency IS NULL OR PaymentAmount IS NULL THEN
+      dbms_output.put_line('Error. Fields contain NULL');
+      raise NO_DATA_FOUND;
+    END IF;
+
+    BaseAmount := ConvertAmount(PaymentCurrency,PaymentAmount,'978');
+    SERNO := PAYMENTS_SEQ.NEXTVAL;
+
+    Begin
+     OPEN cCustomerSERNO (CustomerID);
+     FETCH cCustomerSERNO INTO xCustomerSERNO;
+     IF xCustomerSERNO IS NULL THEN
+       dbms_output.put_line('Error. No customer serno with this ID');
+       raise NO_DATA_FOUND;
+     END IF;
+    End;
+
+    Begin
+      INSERT INTO PAYMENTS (SERNO, LTIMESTAMP, CUSTOMERSERNO, CURRENCY, AMOUNT, BASE_AMOUNT) 
+      VALUES (SERNO, 
+           systimestamp, 
+           xCustomerSERNO, 
+           PaymentCurrency,
+           PaymentAmount,
+           BaseAmount
+         );
+         COMMIT;
+    Exception
+      WHEN others THEN
+         dbms_output.put_line('Error happend. No data was inserted.');
+         ROLLBACK;
+    End;
+    Close cCustomerSERNO;
+  End;
+
+
+
+-- Function ConvertAmount
+
+Create Or Replace Function ConvertAmount(FromCurrency IN CHAR,
+                          FromAmount IN NUMBER,
+                          ToCurrency IN CHAR) return number Is
+
+    Cursor cEXRATE (cFROMCURRENCY CHAR, cTOCURRENCY CHAR) Is 
+      Select RATE From EXRATES e
+      WHERE FROMCURRENCY = cFROMCURRENCY AND 
+            TOCURRENCY = cTOCURRENCY AND 
+            ltimestamp = (
+                          SELECT MAX(ltimestamp) 
+                          FROM EXRATES ee 
+                          WHERE e.FROMCURRENCY = ee.FROMCURRENCY and e.TOCURRENCY = ee.TOCURRENCY
+                          );
+    xEXRATE NUMBER(20,10);
+    toAmount NUMBER(20,10);
+  Begin
+    IF FromCurrency IS NULL OR FromAmount IS NULL OR ToCurrency IS NULL THEN
+      dbms_output.put_line('Error. Fields contain NULL');
+      raise NO_DATA_FOUND;
+    END IF;
+
+    OPEN cEXRATE (FromCurrency, ToCurrency);
+    FETCH cEXRATE INTO xEXRATE;
+    IF xEXRATE IS NULL THEN
+      dbms_output.put_line('Error. Exrate is NULL');
+      raise NO_DATA_FOUND;
+    END IF;
+
+    toAmount := FromAmount * xEXRATE;
+    CLOSE cEXRATE;
+    return toAmount;
+  End;
+
+
+
+-- Test Inserting
+
+declare
+  x NUMBER(10);
+  y NUMBER(20,10);
+Begin
+  -- use procedure
+    InsertPayment(2,'036',100,x,y);
+    dbms_output.put_line(x);
+End;
