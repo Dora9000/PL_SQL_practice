@@ -1,0 +1,76 @@
+-- Insert 1m rows
+declare 
+  N integer := 1000000;
+  from_time char(10) := TO_CHAR(DATE '2017-12-31','J');
+  to_time char(10) := TO_CHAR(SYSDATE,'J');
+
+  Cursor cSERNO Is Select SERNO From CUSTOMERS ORDER BY DBMS_RANDOM.RANDOM;
+  Cursor cCURRENCY Is Select NUMCODE From CURRENCIES ORDER BY DBMS_RANDOM.RANDOM;
+
+  TYPE ARRAY_SERNO IS TABLE OF NUMBER(10);
+  xSERNO ARRAY_SERNO;
+  curSERNO NUMBER(10);
+
+  TYPE ARRAY_CURRENCY IS TABLE OF CHAR(3);
+  xCURRENCY ARRAY_CURRENCY;
+  curCURRENCY CHAR(3);
+
+begin
+  Open cSERNO;
+  FETCH cSERNO BULK COLLECT INTO xSERNO;
+
+  Open cCURRENCY;
+  Fetch cCURRENCY BULK COLLECT INTO xCURRENCY;
+
+  FOR i IN 1..N LOOP
+    curSERNO := xSERNO(MOD(i, xSERNO.count) + 1);
+    curCURRENCY := xCURRENCY(MOD(i, xCURRENCY.count) + 1);
+
+    INSERT INTO PAYMENTS (SERNO, LTIMESTAMP, CUSTOMERSERNO, CURRENCY, AMOUNT, BASE_AMOUNT) 
+    VALUES (PAYMENTS_SEQ.NEXTVAL, 
+           TO_DATE(TRUNC(DBMS_RANDOM.VALUE(from_time,to_time)),'J'), 
+           curSERNO, 
+           curCURRENCY,
+           ROUND(DBMS_RANDOM.VALUE(0,100000), 2),
+           NULL
+           );
+    IF MOD(i, 10000) = 0 THEN
+      COMMIT;
+    END IF;
+  END LOOP; 
+
+  COMMIT;
+  Close cSERNO;
+  Close cCURRENCY;
+end;
+
+
+-- Calculate BASE_AMOUNT
+declare 
+  Cursor cPAYMENT Is Select * From PAYMENTS;
+  xBASE_AMOUNT NUMBER(20,10);
+
+  TYPE ARRAY IS TABLE OF PAYMENTS%ROWTYPE;
+  data ARRAY;
+
+begin
+    OPEN cPAYMENT;
+    FETCH cPAYMENT BULK COLLECT INTO data;
+
+    FOR i IN 1..data.COUNT LOOP
+    IF data(i).BASE_AMOUNT IS NULL THEN
+      begin
+        xBASE_AMOUNT := ConvertAmount(data(i).Currency, data(i).Amount, '978');
+        UPDATE PAYMENTS 
+        SET BASE_AMOUNT=xBASE_AMOUNT
+        WHERE SERNO=data(i).SERNO;
+      Exception
+        WHEN others THEN
+          dbms_output.put_line('Error happend. No data was inserted.');
+          ROLLBACK;
+      End;
+    END IF;
+    END LOOP;
+    COMMIT;
+  Close cPAYMENT;
+end;
